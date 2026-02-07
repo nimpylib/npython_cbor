@@ -5,8 +5,9 @@ import pkg/Objects/[pyobject,
   exceptions,
   dictobjectImpl, listobject, setobject, tupleobject,
   numobjects,
-  stringobject,
+  stringobject, byteobjects,
 ]
+import pkg/Python/lifecycle
 
 import ./cbor
 
@@ -35,6 +36,17 @@ template to*(a: string, _: type PyObject): PyStrObject =
 
 CborAgainst(dict, table)
 CborAgainst(str,  dollar)
+CborAgainst(bytes,items)
+
+proc incl*(s: var HashSet[PyObject], item: PyObject){.raises: [SerializationError].} =
+  handleHashExc do (x: PyBaseErrorObject):
+    raise newException(SerializationError,
+      "unhashable type in set: " & item.typeName)
+  do: {.gcSafe.}:
+    sets.incl(s, item)
+
+CborAgainst(set,  items)
+CborAgainst(frozenset,  items)
 
 proc writeValue*(w: var CborWriter, value: PyObject) {.raises: [IOError],
     gcSafe.} =
@@ -48,6 +60,9 @@ proc writeValue*(w: var CborWriter, value: PyObject) {.raises: [IOError],
   of List:  ret List
   of Dict:  ret Dict
   of Str:   ret Str
+  of Bytes: ret Bytes
+  of Set:   ret Set
+  of Frozenset:ret Frozenset
   else:
     #raise newException(CborError, "unsupported type")
     #TODO:cbor
@@ -68,6 +83,8 @@ proc cborToPy(v: CborValueRef): PyObject{.raises: [].} =
       for k, v in v.objVal:
         (newPyStr(k), cborToPy(v))
   of String: ret Str, strVal
+  of Bytes:  ret Bytes,bytesVal
+  # cbor has no set
   else:
     #TODO:cbor:tag
     return newNotImplementedError newPyAscii"CBOR tag is not supported for now"
@@ -83,6 +100,7 @@ proc readValue*(reader: var CborReader, value: var PyObject) =
 
 when isMainModule:
   import std/unittest
+  Py_Initialize()
 
   test "float":
     let f = 1.23
@@ -99,11 +117,6 @@ when isMainModule:
     let c = Cbor_encode(pyl)
     check c == Cbor_encode(l)
     check ops.`==`(Cbor_decode(c, PyListObject), pyl)
-  import std/strutils
-  proc tohexs(s: openArray[byte]): string =
-    result = ""
-    for i in s:
-      result.add(i.toHex)
   test "dict":
     let d = {"ac": 1.0, "bd": 2.3}.toTable
     let sd = Cbor_encode(d)
@@ -113,14 +126,15 @@ when isMainModule:
         (newPyStr(k), newPyFloat(v))
     let c = Cbor_encode(pd)
 
-    check [c.toHexs, sd.toHexs].toHashSet == [
-      "BF626163FA3F800000626264FB4002666666666666FF",
-      "BF626264FB4002666666666666626163FA3F800000FF",
-    ].toHashSet
-
-    #FIXME: I donno why the following check fails. the decoded dict is correct,
-    #  but the `==` operator returns false
+    check pd == Cbor_decode(c, PyDictObject)
   
-    #check: tables.`==` pd.table, (Cbor_decode(c, PyDictObject)).table
-    # check ops.`==`(Cbor_decode(c, PyDictObject), pd)
+  test "set":
+    let s = ["a", "b", "c"].toHashSet
+    let ps = newPySet: collect:
+      for i in s:
+        PyObject newPyStr(i)
+    let c = Cbor_encode(ps)
+    check c == Cbor_encode(s)
+    let ss = Cbor_decode(c, PySetObject)
+    check ss == ps
 
