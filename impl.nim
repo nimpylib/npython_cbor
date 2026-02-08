@@ -2,7 +2,7 @@
 import std/sugar
 import std/[tables, sets]
 import pkg/Objects/[pyobject,
-  exceptions,
+  exceptions, boolobject, noneobject,
   dictobjectImpl, listobject, setobject, tupleobject,
   numobjects,
   stringobject, byteobjects,
@@ -10,9 +10,15 @@ import pkg/Objects/[pyobject,
 import pkg/Python/lifecycle
 
 import ./cbor
+defineCborPair(PyNoneObject, writeValue(s, cborNull)):
+  var v: CborVoid
+  readValue(s, v)
+  val = pyNone
 
+CborAgainst(bool,   b)
 CborAgainst(float,  v)
 CborAgainst(list, items)
+CborAgainst(Tuple,items)
 
 template handlePyExcIt(E; errMsg: string; body) =
   handleHashExc do (it: PyBaseErrorObject):
@@ -24,6 +30,8 @@ proc dollar(p: PyObject): string =
   handlePyExcIt(IOError, "failed to convert PyObject to string for type " & p.typeName) do:
    {.gcSafe.}:
     result = $p
+
+#XXX:cbor_serialization-BUG: it only supports string keys, but cbor supports more types for keys
 # for `write` to use. (a.k.a. Cbor_encode)
 template `$`(x: PyObject): string = dollar x
 
@@ -56,8 +64,11 @@ proc writeValue*(w: var CborWriter, value: PyObject) {.raises: [IOError],
     write(w, cborNull)
     return
   case value.pyType.kind
+  of None:  ret None
+  of Bool:  ret Bool
   of Float: ret Float
   of List:  ret List
+  of Tuple: ret Tuple
   of Dict:  ret Dict
   of Str:   ret Str
   of Bytes: ret Bytes
@@ -73,6 +84,9 @@ proc cborToPy(v: CborValueRef): PyObject{.raises: [].} =
   template ret(T, a) =
     return `new Py T`(v.a)
   case v.kind
+  of Null:  return pyNone
+  of Undefined: return pyNone  # treat undefined as None?
+  of Bool:  ret Bool,  boolVal
   of Float: ret Float, floatVal
   of Array:
     return newPyList: collect:
@@ -84,7 +98,7 @@ proc cborToPy(v: CborValueRef): PyObject{.raises: [].} =
         (newPyStr(k), cborToPy(v))
   of String: ret Str, strVal
   of Bytes:  ret Bytes,bytesVal
-  # cbor has no set
+  # cbor has no set, tuple
   else:
     #TODO:cbor:tag
     return newNotImplementedError newPyAscii"CBOR tag is not supported for now"
@@ -101,6 +115,11 @@ proc readValue*(reader: var CborReader, value: var PyObject) =
 when isMainModule:
   import std/unittest
   Py_Initialize()
+
+  test "none":
+    let pnone = pyNone
+    let c = Cbor_encode(pnone)
+    check Cbor_decode(c, PyNoneObject) == pnone
 
   test "float":
     let f = 1.23
