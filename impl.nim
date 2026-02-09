@@ -1,5 +1,6 @@
 
 import std/sugar
+import std/math
 import std/[tables, sets]
 import pkg/Objects/[pyobject,
   exceptions, boolobject, noneobject,
@@ -14,6 +15,40 @@ defineCborPair(PyNoneObject, writeValue(s, cborNull)):
   var v: CborVoid
   readValue(s, v)
   val = pyNone
+
+#XXX:typst use float for big ints to avoid overflow
+#  typst doesn't support cbor tags
+defineCborPair PyIntObject:
+ {.gcSafe.}:
+  var i: BiggestUInt
+  if val.absToUInt i:
+    var num: CborNumber
+    num.integer = i
+    if val.negative:
+      num.sign = CborSign.Neg
+    writeValue(s, num)
+  else:
+    # for big ints, serialize as string to avoid overflow
+    writeValue(s, val.toFloat)
+do:
+  case s.parser.cborKind()
+  of Unsigned, CborValueKind.Negative, CborValueKind.Simple:
+    var num: CborNumber
+    readValue(s, num)
+    val = newPyInt(num.integer)
+    if num.sign == CborSign.Neg:
+      val.negate()
+  of CborValueKind.Float:
+    var f: float64
+    readValue(s, f)
+    if floor(f) != f:
+      raise newException(CborError, "float is not an integer")
+    let i = newPyInt(f)
+    if i.isThrownException:
+      raise newException(CborError, $i)
+    val = PyIntObject i
+  else:
+    raise newException(CborError, "invalid CBOR type for PyIntObject")
 
 CborAgainst(bool,   b)
 CborAgainst(float,  v)
@@ -66,6 +101,7 @@ proc writeValue*(w: var CborWriter, value: PyObject) {.raises: [IOError],
   case value.pyType.kind
   of None:  ret None
   of Bool:  ret Bool
+  of Int:   ret Int
   of Float: ret Float
   of List:  ret List
   of Tuple: ret Tuple
@@ -87,6 +123,14 @@ proc cborToPy(v: CborValueRef): PyObject{.raises: [].} =
   of Null:  return pyNone
   of Undefined: return pyNone  # treat undefined as None?
   of Bool:  ret Bool,  boolVal
+  of Simple:
+    template simpleUint8(x): uint8 =
+      x.simpleVal.uint8
+    ret Int, simpleUint8
+  of Unsigned: return newPyInt v.numVal.integer
+  of CborValueKind.Negative:
+    let res = newPyInt v.numVal.integer
+    return -res
   of Float: ret Float, floatVal
   of Array:
     return newPyList: collect:
@@ -99,7 +143,7 @@ proc cborToPy(v: CborValueRef): PyObject{.raises: [].} =
   of String: ret Str, strVal
   of Bytes:  ret Bytes,bytesVal
   # cbor has no set, tuple
-  else:
+  of Tag:
     #TODO:cbor:tag
     return newNotImplementedError newPyAscii"CBOR tag is not supported for now"
 
@@ -120,6 +164,26 @@ when isMainModule:
     let pnone = pyNone
     let c = Cbor_encode(pnone)
     check Cbor_decode(c, PyNoneObject) == pnone
+  
+  suite "int":
+    template t(i; eq: untyped = `==`) =
+      let pi = newPyInt(i)
+      let c = Cbor_encode(pi)
+      check eq(Cbor_decode(c, PyIntObject), pi)
+    test "small":
+      t 123
+      t "1234567890"
+    test "negative":
+      t -456
+    template `==~`(a, b: PyIntObject): bool =
+      a.toFloat == b.toFloat
+    test "big":
+      t "12345678901234567890", `==~`
+    test "very big":
+      when defined(npythonGoodIntFromBigFloat):
+        t "123456789011121314151617181920", `==~`
+      else:
+        skip()
 
   test "float":
     let f = 1.23
