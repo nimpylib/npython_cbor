@@ -5,8 +5,9 @@ when defined(cborious):
   type CborError* = CborInvalidHeaderError
   template writeValue*(s: Stream, val: auto) = cborPack(s, val)
   template readValue*(s: Stream, val: var auto) = cborUnpack(s, val)
-  template defineCborPair*(T; writeImpl, readImpl){.dirty.} =
+  template defineCborWrite*(T; writeImpl){.dirty.} =
     proc cborPack*(s: Stream; val: T) = writeImpl
+  template defineCborRead*(T; readImpl){.dirty.} =
     proc cborUnpack*(s: Stream; val: var T) = readImpl
   # def is {CborObjToArray, CborCheckHoleyEnums} instead of CborObjToMap
   const flags = {CborObjToMap, CborEnumAsString, CborCheckHoleyEnums}
@@ -20,8 +21,9 @@ else:
   import pkg/cbor_serialization
   import pkg/cbor_serialization/std/[sets as cbor_sets, tables as cbor_tables]
   export cbor_serialization, cbor_sets, cbor_tables
-  template defineCborPair*(T; writeImpl, readImpl){.dirty.} =
+  template defineCborWrite*(T; writeImpl){.dirty.} =
     proc writeValue*(s: var CborWriter; val: T) = writeImpl
+  template defineCborRead*(T; readImpl){.dirty.} =
     proc readValue*(s: var CborReader; val: var T) = readImpl
   template Cbor_encode*[T](d: T): untyped =
     bind Cbor, encode
@@ -29,6 +31,10 @@ else:
   template Cbor_decode*[T](dd; _: typedesc[T]): T =
     bind Cbor, decode
     decode(typeof Cbor, dd, T)
+
+template defineCborPair*(T; writeImpl, readImpl){.dirty.} =
+  defineCborWrite(T, writeImpl)
+  defineCborRead(T, readImpl)
 
 defineCborPair(char, writeValue(s, $val)):
   var v: string

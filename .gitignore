@@ -1,4 +1,5 @@
 # result of `testament`
+/bin/
 /testresults/
 nimcache/
 htmldocs/
