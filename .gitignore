@@ -1,5 +1,6 @@
-# result of `testament`
 /bin/
+/nimble.paths
+# result of `testament`
 /testresults/
 nimcache/
 htmldocs/
