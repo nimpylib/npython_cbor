@@ -8,6 +8,8 @@ export npy
 import ./cbor
 defineCborPair(PyNoneObject, writeValue(s, cborNull)):
   var v: CborVoid
+  if s.parser.cborKind() != CborValueKind.Null:
+    raise newException(CborError, "only Null is expected for PyNoneObject")
   readValue(s, v)
   val = pyNone
 
