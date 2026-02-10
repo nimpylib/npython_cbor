@@ -15,6 +15,7 @@ defineCborPair(PyNoneObject, writeValue(s, cborNull)):
 
 #XXX:typst use float for big ints to avoid overflow
 #  typst doesn't support cbor tags
+{.define: npyCborIntBigFloat.}
 defineCborPair PyIntObject:
  {.gcSafe.}:
   var i: BiggestUInt
@@ -22,19 +23,26 @@ defineCborPair PyIntObject:
     var num: CborNumber
     num.integer = i
     if val.negative:
+      num.integer -= 1
       num.sign = CborSign.Neg
     writeValue(s, num)
   else:
-    # for big ints, serialize as string to avoid overflow
+    # for big ints, serialize as float, as in typst
     writeValue(s, val.toFloat)
 do:
-  case s.parser.cborKind()
-  of Unsigned, CborValueKind.Negative, CborValueKind.Simple:
+  template getInt(offset) =
     var num: CborNumber
     readValue(s, num)
-    val = newPyInt(num.integer)
-    if num.sign == CborSign.Neg:
-      val.negate()
+    val = newPyInt(num.integer + offset)
+  case s.parser.cborKind()
+  of CborValueKind.Simple:
+    var simpleVal: CborSimpleValue
+    readValue(s, simpleVal)
+    # cborKind already checked for these, and .Simple is only used for uint8
+    assert simpleVal not_in {cborFalse, cborTrue, cborNull, cborUndefined}
+    val = newPyInt(simpleVal.uint8)
+  of CborValueKind.Unsigned: getInt(0)
+  of CborValueKind.Negative: getInt(1); val.negate()
   of CborValueKind.Float:
     var f: float64
     readValue(s, f)
@@ -131,7 +139,7 @@ proc cborToPy(v: CborValueRef): PyObject{.raises: [].} =
     ret Int, simpleUint8
   of Unsigned: return newPyInt v.numVal.integer
   of CborValueKind.Negative:
-    let res = newPyInt v.numVal.integer
+    let res = newPyInt v.numVal.integer+1
     return -res
   of Float: ret Float, floatVal
   of Array:
