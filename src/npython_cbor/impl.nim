@@ -13,9 +13,9 @@ defineCborPair(PyNoneObject, writeValue(s, cborNull)):
   readValue(s, v)
   val = pyNone
 
-#XXX:typst use float for big ints to avoid overflow
-#  typst doesn't support cbor tags
-{.define: npyCborIntBigFloat.}
+const npyCborIntBigFloat*{.booldefine.} = defined(typst)  ## \
+## XXX:typst use float for big ints to avoid overflow
+##  typst doesn't support cbor tags
 defineCborPair PyIntObject:
  {.gcSafe.}:
   var i: BiggestUInt
@@ -27,9 +27,15 @@ defineCborPair PyIntObject:
       num.sign = CborSign.Neg
     writeValue(s, num)
   else:
-    # for big ints, serialize as float, as in typst
-    writeValue(s, val.toFloat)
+    when npyCborIntBigFloat:
+      # for big ints, serialize as float, as in typst
+      writeValue(s, val.toFloat)
+    else:
+      writeValue(s, val.v)
 do:
+  template invalidKind =
+    raise newException(CborError, "invalid CBOR type for PyIntObject")
+
   template getInt(offset) =
     var num: CborNumber
     readValue(s, num)
@@ -52,8 +58,15 @@ do:
     if i.isThrownException:
       raise newException(CborError, $i)
     val = PyIntObject i
+  of CborValueKind.Tag:
+    when npyCborIntBigFloat:
+      invalidKind
+    else:
+      var iobj: IntObject
+      readValue(s, iobj)
+      val = newPyInt(iobj)
   else:
-    raise newException(CborError, "invalid CBOR type for PyIntObject")
+    invalidKind
 
 CborAgainst(bool,   b)
 CborAgainst(float,  v)
@@ -154,6 +167,13 @@ proc cborToPy(v: CborValueRef): PyObject{.raises: [].} =
   of Bytes:  ret Bytes,bytesVal
   # cbor has no set, tuple
   of Tag:
+    when not npyCborIntBigFloat:
+      case v.tagVal.tag
+      of unsignedTag:
+        return newPyInt(v.tagVal.val.bytesVal, bigEndian, signed = false)
+      of negativeTag:
+        return newPyInt(v.tagVal.val.bytesVal, bigEndian, signed = true)
+      else: discard
     #TODO:cbor:tag
     return newNotImplementedError newPyAscii"CBOR tag is not supported for now"
 
