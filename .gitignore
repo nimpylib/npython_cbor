@@ -1,3 +1,5 @@
+/*.code-workspace
+/src/*.typ
 /bin/
 /nimble.paths
 # result of `testament`
