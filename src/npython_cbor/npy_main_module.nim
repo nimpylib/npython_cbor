@@ -1,6 +1,6 @@
 
 import ./private/trans_imp
-impExp pkg/Objects, [pyobject,
+impExp pkg/npython/Objects, [pyobject,
   moduleobjectImpl, typeobject,
   exceptions, boolobject, noneobject,
   dictobjectImpl, listobject, setobject, tupleobject,
@@ -8,8 +8,10 @@ impExp pkg/Objects, [pyobject,
   stringobject, byteobjects,
 ]
 
-impExp pkg/Python, [npython, pythonrun, sysmodule_instance]
-# import pkg/Python/getargs/[vargs, va_and_kw, dispatch]
+import pkg/npython
+export npython
+impExp pkg/npython/Python, [pythonrun, sysmodule_instance]
+# import pkg/npython/Python/getargs/[vargs, va_and_kw, dispatch]
 
 import ./[impl, cborLib]
 export impl, cborLib
